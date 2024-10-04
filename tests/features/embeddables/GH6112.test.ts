@@ -1,5 +1,5 @@
-import { MikroORM } from '@mikro-orm/better-sqlite';
-import { BaseEntity, Embeddable, Embedded, Entity, PrimaryKey, Property } from '@mikro-orm/core';
+import { MikroORM, Options } from '@mikro-orm/better-sqlite';
+import { Embeddable, Embedded, Entity, EntityClass, PrimaryKey, Property, RequiredEntityData } from '@mikro-orm/core';
 
 @Embeddable()
 class Address {
@@ -16,13 +16,16 @@ class Company {
   @Property()
   name!: string;
 
-  @Embedded(() => Address, { prefix: 'addr_' })
+  @Embedded(() => Address, { prefix: 'addr_', prefixBehavior: 'relative' })
   address!: Address;
+
+  @Embedded(() => Address, { prefix: 'addr2_' /* behavior from configuration */ })
+  address2!: Address;
 
 }
 
 @Entity()
-class Person extends BaseEntity {
+class Person {
 
   @PrimaryKey()
   id!: number;
@@ -35,55 +38,115 @@ class Person extends BaseEntity {
 
 }
 
-describe('GH #TODO', () => {
+describe('GH #6112', () => {
   let orm: MikroORM;
 
-  beforeAll(async () => {
+  afterEach(async () => {
+    if (!orm) {
+      return;
+    }
+
+    orm.em.clear();
+    await orm.close();
+  });
+
+  async function loadORM(entity: EntityClass<any>, options: Options = {}) {
+    // and get field names
     orm = await MikroORM.init({
-      entities: [Person],
       dbName: ':memory:',
       strict: true,
       validate: true,
       validateRequired: true,
+      ...options,
+      entities: [entity],
     });
-
     await orm.schema.createSchema();
-  });
 
-  afterAll(() => orm.close(true));
-  afterEach(() => orm.em.clear());
+    const meta = orm.getMetadata().get(entity);
+    return {
+      fieldNames: meta.comparableProps
+        .map(({ name, fieldNames }) => [name, fieldNames[0]])
+        .sort(([a], [b]) => a.localeCompare(b)),
+      orm,
+    };
+  }
 
   it('should have the property prefixed with the one of its parent', async () => {
-    const meta = orm.getMetadata().get(Person);
-
-    const fieldNames = meta.comparableProps
-      .map(({ name, fieldNames }) => [name, fieldNames[0]])
-      .sort(([a], [b]) => a.localeCompare(b));
-
+    const { fieldNames, orm } = await loadORM(Person);
     expect(fieldNames).toStrictEqual([
       [ 'address', 'address' ],
       [ 'address_city', 'address_city' ],
-
-      // Currently:
-      // [ 'comp_address_city', 'addr_city' ],
-      // Expected:
+      // behavior: relative
       [ 'comp_address_city', 'comp_addr_city' ],
-
+      // behavior: absolute
+      [ 'comp_address2_city', 'addr2_city' ],
       [ 'company', 'company' ],
       [ 'company_address', 'comp_address' ],
+      [ 'company_address2', 'comp_address2' ],
       [ 'company_name', 'comp_name' ],
       [ 'id', 'id' ],
     ]);
+
+    // To assure create & read
+    const repo = orm.em.getRepository(Person);
+    const toCreate = {
+      address: { city: 'city' },
+      company: {
+        address: { city: 'city-company' },
+        address2: { city: 'city-company2' },
+        name: 'company',
+      },
+    };
+
+    repo.create(toCreate);
+    await orm.em.flush();
+
+    const [person] = await repo.findAll();
+    expect(person).toMatchObject(toCreate);
   });
 
+  it('should have the property prefixed with the one of its parent2', async () => {
+    const { fieldNames, orm } = await loadORM(Person, { embeddable: { prefixBehavior: 'relative' } });
+    expect(fieldNames).toStrictEqual([
+      [ 'address', 'address' ],
+      [ 'address_city', 'address_city' ],
+      // behavior: relative
+      [ 'comp_address_city', 'comp_addr_city' ],
+      // behavior: relative (from configuration)
+      [ 'comp_address2_city', 'comp_addr2_city' ],
+      [ 'company', 'company' ],
+      [ 'company_address', 'comp_address' ],
+      [ 'company_address2', 'comp_address2' ],
+      [ 'company_name', 'comp_name' ],
+      [ 'id', 'id' ],
+    ]);
+
+    // To assure create & read
+    const repo = orm.em.getRepository(Person);
+    const toCreate = {
+      address: { city: 'city' },
+      company: {
+        address: { city: 'city-company' },
+        address2: { city: 'city-company2' },
+        name: 'company',
+      },
+    };
+
+    repo.create(toCreate);
+    await orm.em.flush();
+
+    const [person] = await repo.findAll();
+    expect(person).toMatchObject(toCreate);
+  });
 
   it('should create the metadata without conflict', async () => {
     @Entity()
-    class PersonWithAddr extends BaseEntity {
+    class PersonWithAddr {
 
       @PrimaryKey()
       id!: number;
 
+      // To not conflict with `company.address`
       @Embedded(() => Address)
       addr!: Address;
 
@@ -92,18 +155,36 @@ describe('GH #TODO', () => {
 
     }
 
-    let orm: MikroORM | undefined;
-    const loadORM = async () => orm = await MikroORM.init({
-      entities: [PersonWithAddr],
-      dbName: ':memory:',
-      strict: true,
-      validate: true,
-      validateRequired: true,
-    });
+    const { fieldNames, orm } = await loadORM(PersonWithAddr);
+    expect(fieldNames).toStrictEqual([
+      [ 'addr', 'addr' ],
+      [ 'addr_city', 'addr_city' ],
+      [ 'company', 'company' ],
+      [ 'company_address', 'company_address' ],
+      // behavior: relative
+      [ 'company_address_city', 'company_addr_city' ],
+      [ 'company_address2', 'company_address2' ],
+      // behavior: absolute
+      [ 'company_address2_city', 'addr2_city' ],
+      [ 'company_name', 'company_name' ],
+      [ 'id', 'id' ],
+    ]);
 
-    // MetadataError: Duplicate fieldNames are not allowed: Person.company_address.city (fieldName: 'addr_city'), Person.addr.city (fieldName: 'addr_city')
-    await expect(loadORM()).resolves.toBeDefined();
+    // To assure create & read
+    const repo = orm.em.getRepository(PersonWithAddr);
+    const toCreate = {
+      addr: { city: 'city' },
+      company: {
+        address: { city: 'city-company' },
+        address2: { city: 'city-company2' },
+        name: 'company',
+      },
+    };
 
-    await orm?.close();
+    repo.create(toCreate);
+    await orm.em.flush();
+
+    const [person] = await repo.findAll();
+    expect(person).toMatchObject(toCreate);
   });
 });
