@@ -16,7 +16,6 @@ class Company {
   @Property()
   name!: string;
 
-
   @Embedded(() => Address, { prefix: 'addr_' })
   address!: Address;
 
@@ -79,32 +78,32 @@ describe('GH #TODO', () => {
 
 
   it('should create the metadata without conflict', async () => {
-      @Entity()
-      class PersonWithAddr extends BaseEntity {
+    @Entity()
+    class PersonWithAddr extends BaseEntity {
 
-        @PrimaryKey()
-        id!: number;
+      @PrimaryKey()
+      id!: number;
 
-        @Embedded(() => Address)
-        addr!: Address;
+      @Embedded(() => Address)
+      addr!: Address;
 
-        @Embedded(() => Company)
-        company!: Company;
+      @Embedded(() => Company)
+      company!: Company;
 
-      }
+    }
 
-      let orm: MikroORM | undefined;
-      const loadORM = async () => orm = await MikroORM.init({
-        entities: [PersonWithAddr],
-        dbName: ':memory:',
-        strict: true,
-        validate: true,
-        validateRequired: true,
-      });
-
-      // MetadataError: Duplicate fieldNames are not allowed: Person.company_address.city (fieldName: 'addr_city'), Person.addr.city (fieldName: 'addr_city')
-      await expect(loadORM()).resolves.toBeDefined();
-
-      await orm?.close();
+    let orm: MikroORM | undefined;
+    const loadORM = async () => orm = await MikroORM.init({
+      entities: [PersonWithAddr],
+      dbName: ':memory:',
+      strict: true,
+      validate: true,
+      validateRequired: true,
     });
+
+    // MetadataError: Duplicate fieldNames are not allowed: Person.company_address.city (fieldName: 'addr_city'), Person.addr.city (fieldName: 'addr_city')
+    await expect(loadORM()).resolves.toBeDefined();
+
+    await orm?.close();
+  });
 });
