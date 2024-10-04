@@ -1,5 +1,5 @@
 import { MikroORM, Options } from '@mikro-orm/better-sqlite';
-import { Embeddable, Embedded, Entity, EntityClass, PrimaryKey, Property, RequiredEntityData } from '@mikro-orm/core';
+import { Embeddable, Embedded, Entity, EntityClass, PrimaryKey, Property } from '@mikro-orm/core';
 
 @Embeddable()
 class Address {
