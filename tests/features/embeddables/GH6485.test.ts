@@ -80,7 +80,7 @@ class Host {
 }
 
 
-describe('GH #XXXX', () => {
+describe('GH #6485', () => {
   let orm: MikroORM;
 
   afterEach(async () => {
